@@ -47,4 +47,127 @@
         const SERVICE_UUID = "19b10000-e8f2-537e-4f6c-d104768a1214";
         const uuids = {
             temp: "19b10001-e8f2-537e-4f6c-d104768a1214", hum: "19b10002-e8f2-537e-4f6c-d104768a1214",
-            tvoc: "19b10003-e8
+            tvoc: "19b10003-e8f2-537e-4f6c-d104768a1214", eco2: "19b10004-e8f2-537e-4f6c-d104768a1214",
+            pm1: "19b10005-e8f2-537e-4f6c-d104768a1214", pm25: "19b10006-e8f2-537e-4f6c-d104768a1214", pm10: "19b10007-e8f2-537e-4f6c-d104768a1214"
+        };
+
+        let currentData = { temp: 0, hum: 0, tvoc: 0, eco2: 0, pm1: 0, pm25: 0, pm10: 0 };
+        let dataLog = [["Time", "Temp (C)", "Humidity (%)", "TVOC (ppb)", "eCO2 (ppm)", "PM 1.0", "PM 2.5", "PM 10"]];
+        let isLogging = false;
+
+        // Chart.js Setup with all 7 datasets
+        const ctx = document.getElementById('aqiChart').getContext('2d');
+        const aqiChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [], 
+                datasets: [
+                    { label: 'Temp', borderColor: '#ff6384', data: [], hidden: true, tension: 0.3 },   // 0
+                    { label: 'Hum', borderColor: '#36a2eb', data: [], hidden: true, tension: 0.3 },    // 1
+                    { label: 'TVOC', borderColor: '#ff9f40', data: [], hidden: false, tension: 0.3 },  // 2 (Default On)
+                    { label: 'eCO2', borderColor: '#9966ff', data: [], hidden: true, tension: 0.3 },   // 3
+                    { label: 'PM 1.0', borderColor: '#4bc0c0', data: [], hidden: true, tension: 0.3 }, // 4
+                    { label: 'PM 2.5', borderColor: '#ffcd56', data: [], hidden: false, tension: 0.3 },// 5 (Default On)
+                    { label: 'PM 10', borderColor: '#c9cbcf', data: [], hidden: true, tension: 0.3 }   // 6
+                ]
+            },
+            options: { responsive: true, scales: { x: { display: false } }, plugins: { legend: { display: false } } }
+        });
+
+        // Listen for checkbox clicks to show/hide lines
+        document.querySelectorAll('#controls input[type="checkbox"]').forEach(checkbox => {
+            checkbox.addEventListener('change', function() {
+                const datasetIndex = parseInt(this.value);
+                // Toggle the hidden property based on whether the box is checked
+                aqiChart.data.datasets[datasetIndex].hidden = !this.checked;
+                aqiChart.update();
+            });
+        });
+
+        document.getElementById('connectBtn').addEventListener('click', async () => {
+            try {
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'Nano_Air_Quality' }, { name: 'Nano_AQI_V2' }],
+                    optionalServices: [SERVICE_UUID]
+                });
+
+                document.getElementById('connectBtn').innerText = "Connecting...";
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService(SERVICE_UUID);
+
+                async function setupSensor(key, uuid, isFloat) {
+                    const characteristic = await service.getCharacteristic(uuid);
+                    await characteristic.startNotifications();
+                    characteristic.addEventListener('characteristicvaluechanged', (event) => {
+                        let val = isFloat ? event.target.value.getFloat32(0, true) : event.target.value.getInt32(0, true);
+                        if (isFloat) val = parseFloat(val.toFixed(1));
+                        document.getElementById(key).innerText = val;
+                        currentData[key] = val;
+                    });
+                }
+
+                const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+                await setupSensor('temp', uuids.temp, true); await sleep(250);
+                await setupSensor('hum', uuids.hum, true); await sleep(250);
+                await setupSensor('tvoc', uuids.tvoc, false); await sleep(250);
+                await setupSensor('eco2', uuids.eco2, false); await sleep(250);
+                await setupSensor('pm1', uuids.pm1, false); await sleep(250);
+                await setupSensor('pm25', uuids.pm25, false); await sleep(250);
+                await setupSensor('pm10', uuids.pm10, false);
+
+                document.getElementById('connectBtn').innerText = "Connected & Logging!";
+                document.getElementById('connectBtn').classList.add("btn-success");
+                document.getElementById('chartCard').style.display = "block";
+                document.getElementById('downloadBtn').style.display = "inline-block";
+                isLogging = true;
+
+            } catch (error) {
+                console.log(error);
+                alert("Connection failed! Check Nano power and close other apps.");
+                document.getElementById('connectBtn').innerText = "Try Again";
+            }
+        });
+
+        setInterval(() => {
+            if (isLogging) {
+                const timeStr = new Date().toLocaleTimeString();
+                
+                // 1. Update Graph (Push ALL data to their datasets)
+                aqiChart.data.labels.push(timeStr);
+                aqiChart.data.datasets[0].data.push(currentData.temp);
+                aqiChart.data.datasets[1].data.push(currentData.hum);
+                aqiChart.data.datasets[2].data.push(currentData.tvoc);
+                aqiChart.data.datasets[3].data.push(currentData.eco2);
+                aqiChart.data.datasets[4].data.push(currentData.pm1);
+                aqiChart.data.datasets[5].data.push(currentData.pm25);
+                aqiChart.data.datasets[6].data.push(currentData.pm10);
+                
+                // Keep chart from getting too crowded (50 points max)
+                if(aqiChart.data.labels.length > 50) {
+                    aqiChart.data.labels.shift();
+                    aqiChart.data.datasets.forEach(dataset => dataset.data.shift());
+                }
+                aqiChart.update();
+
+                // 2. Add to CSV Log
+                dataLog.push([
+                    timeStr, currentData.temp, currentData.hum, 
+                    currentData.tvoc, currentData.eco2, 
+                    currentData.pm1, currentData.pm25, currentData.pm10
+                ]);
+            }
+        }, 5000);
+
+        document.getElementById('downloadBtn').addEventListener('click', () => {
+            let csvContent = "data:text/csv;charset=utf-8," + dataLog.map(e => e.join(",")).join("\n");
+            var encodedUri = encodeURI(csvContent);
+            var link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "air_quality_log.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+    </script>
+</body>
+</html>
