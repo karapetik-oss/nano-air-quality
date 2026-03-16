@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Nano Air Quality</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background-color: #121212; color: white; padding: 20px; }
+        .card { background: #1e1e1e; border-radius: 10px; padding: 20px; margin: 10px auto; max-width: 400px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
+        .value { font-size: 2em; font-weight: bold; color: #4CAF50; }
+        button { background-color: #007bff; color: white; border: none; padding: 15px 30px; font-size: 1.2em; border-radius: 5px; cursor: pointer; margin-bottom: 20px; }
+        button:hover { background-color: #0056b3; }
+    </style>
+</head>
+<body>
+
+    <h2>Air Quality Station</h2>
+    <button id="connectBtn">Connect to Nano</button>
+
+    <div class="card">
+        <h3>Climate</h3>
+        <p>Temperature: <span class="value" id="temp">--</span> °C</p>
+        <p>Humidity: <span class="value" id="hum">--</span> %</p>
+    </div>
+
+    <div class="card">
+        <h3>Gas & VOC</h3>
+        <p>TVOC: <span class="value" id="tvoc">--</span> ppb</p>
+        <p>eCO2: <span class="value" id="eco2">--</span> ppm</p>
+    </div>
+
+    <div class="card">
+        <h3>Particulate Matter</h3>
+        <p>PM 1.0: <span class="value" id="pm1">--</span></p>
+        <p>PM 2.5: <span class="value" id="pm25">--</span></p>
+        <p>PM 10: <span class="value" id="pm10">--</span></p>
+    </div>
+
+    <script>
+        // The UUIDs from your Arduino code
+        const SERVICE_UUID = "19b10000-e8f2-537e-4f6c-d104768a1214";
+        const TEMP_UUID = "19b10001-e8f2-537e-4f6c-d104768a1214";
+        const HUM_UUID = "19b10002-e8f2-537e-4f6c-d104768a1214";
+        const TVOC_UUID = "19b10003-e8f2-537e-4f6c-d104768a1214";
+        const ECO2_UUID = "19b10004-e8f2-537e-4f6c-d104768a1214";
+        const PM1_UUID = "19b10005-e8f2-537e-4f6c-d104768a1214";
+        const PM25_UUID = "19b10006-e8f2-537e-4f6c-d104768a1214";
+        const PM10_UUID = "19b10007-e8f2-537e-4f6c-d104768a1214";
+
+        document.getElementById('connectBtn').addEventListener('click', async () => {
+            try {
+                // Request the Bluetooth device
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'Nano_Air_Quality' }],
+                    optionalServices: [SERVICE_UUID]
+                });
+
+                document.getElementById('connectBtn').innerText = "Connecting...";
+
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService(SERVICE_UUID);
+
+                // Helper function to setup notifications and decode the bytes
+                async function setupSensor(uuid, elementId, isFloat) {
+                    const characteristic = await service.getCharacteristic(uuid);
+                    await characteristic.startNotifications();
+                    characteristic.addEventListener('characteristicvaluechanged', (event) => {
+                        const dataView = event.target.value;
+                        // True = Little Endian (which is how Arduino sends data)
+                        let value = isFloat ? dataView.getFloat32(0, true) : dataView.getInt32(0, true);
+                        
+                        // Round floats to 1 decimal place
+                        if (isFloat) value = value.toFixed(1);
+                        
+                        document.getElementById(elementId).innerText = value;
+                    });
+                }
+
+// Helper function to create a tiny pause
+                const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+                // Connect sequentially with a 250ms delay so the Nano doesn't choke
+                await setupSensor(TEMP_UUID, 'temp', true);
+                await sleep(250);
+                
+                await setupSensor(HUM_UUID, 'hum', true);
+                await sleep(250);
+                
+                await setupSensor(TVOC_UUID, 'tvoc', false);
+                await sleep(250);
+                
+                await setupSensor(ECO2_UUID, 'eco2', false);
+                await sleep(250);
+                
+                await setupSensor(PM1_UUID, 'pm1', false);
+                await sleep(250);
+                
+                await setupSensor(PM25_UUID, 'pm25', false);
+                await sleep(250);
+                
+                await setupSensor(PM10_UUID, 'pm10', false);
+
+                document.getElementById('connectBtn').innerText = "Connected! Receiving Data...";
+                document.getElementById('connectBtn').style.backgroundColor = "#4CAF50";
+
+            } catch (error) {
+                console.log(error);
+                alert("Connection failed! Make sure the Arduino is on and you aren't connected in another app.");
+                document.getElementById('connectBtn').innerText = "Try Again";
+            }
+        });
+    </script>
+</body>
+</html>
